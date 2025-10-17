@@ -1,0 +1,19 @@
+# act configuration file
+# This file configures how act runs GitHub Actions locally
+
+# Use medium-sized Docker images (good balance of speed and compatibility)
+# GitHub Workflow matrix OS should match the list of target platforms below
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+-P macos-latest=catthehacker/ubuntu:act-latest
+-P macos-14=catthehacker/ubuntu:act-latest
+
+# Don't use real GitHub token by default (use --secret GITHUB_TOKEN=... if needed)
+# -s GITHUB_TOKEN=
+
+# Enable verbose output by default
+# --verbose
+
+# Performance optimizations
+--reuse                              # Reuse containers for faster runs
+--container-architecture linux/amd64 # Explicit architecture
+--bind                               # Bind working directory

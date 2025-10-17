@@ -1,0 +1,288 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Job 1: Build binaries for multiple platforms
+  build:
+    name: Build on ${{ matrix.os }} (Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-14]  # macos-14 is ARM64
+        python-version: ['3.12']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for version detection
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Display Python version
+      run: python --version
+
+    - name: Make build script executable
+      run: chmod +x scripts/build.sh
+
+    - name: Build binary
+      run: ./scripts/build.sh
+      env:
+        PYTHON: python
+
+    - name: Run basic tests
+      run: |
+        ./dist/dip --help
+        ./dist/dip --version || true
+
+    - name: Get binary information
+      id: binary_info
+      shell: bash
+      run: |
+        BINARY_SIZE=$(ls -lh dist/dip | awk '{print $5}')
+        echo "size=$BINARY_SIZE" >> $GITHUB_OUTPUT
+        
+        # Calculate SHA256
+        if command -v shasum &> /dev/null; then
+          SHA256=$(shasum -a 256 dist/dip | cut -d' ' -f1)
+        else
+          SHA256=$(sha256sum dist/dip | cut -d' ' -f1)
+        fi
+        echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+        
+        # Get OS architecture
+        ARCH=$(uname -m)
+        echo "arch=$ARCH" >> $GITHUB_OUTPUT
+
+    - name: Rename binary with platform info
+      shell: bash
+      run: |
+        OS_NAME="${{ matrix.os }}"
+        PYTHON_VER="${{ matrix.python-version }}"
+        ARCH="${{ steps.binary_info.outputs.arch }}"
+        
+        # Simplify OS names
+        if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
+          OS_SIMPLE="linux"
+        elif [[ "$OS_NAME" == "macos-latest" ]]; then
+          OS_SIMPLE="macos-x86_64"
+        elif [[ "$OS_NAME" == "macos-14" ]]; then
+          OS_SIMPLE="macos-arm64"
+        else
+          OS_SIMPLE="$OS_NAME"
+        fi
+        
+        NEW_NAME="dip-${OS_SIMPLE}-py${PYTHON_VER}"
+        mv dist/dip "dist/${NEW_NAME}"
+        echo "BINARY_NAME=${NEW_NAME}" >> $GITHUB_ENV
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.BINARY_NAME }}
+        path: dist/${{ env.BINARY_NAME }}
+        retention-days: 30
+        compression-level: 9
+
+    - name: Create build summary
+      shell: bash
+      run: |
+        cat >> $GITHUB_STEP_SUMMARY << EOF
+        ### Build Summary :rocket:
+        
+        - **Binary**: \`${{ env.BINARY_NAME }}\`
+        - **OS**: ${{ matrix.os }} (${{ steps.binary_info.outputs.arch }})
+        - **Python**: ${{ matrix.python-version }}
+        - **Size**: ${{ steps.binary_info.outputs.size }}
+        - **SHA256**: \`${{ steps.binary_info.outputs.sha256 }}\`
+        EOF
+
+  # Job 2: Create a GitHub Release (only on tags)
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      discussions: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Prepare release assets
+      run: |
+        mkdir -p release
+        
+        # Copy all binaries to release directory
+        for artifact_dir in artifacts/*/; do
+          if [ -d "$artifact_dir" ]; then
+            binary_name=$(basename "$artifact_dir")
+            cp "$artifact_dir/$binary_name" "release/$binary_name"
+            chmod +x "release/$binary_name"
+          fi
+        done
+        
+        # List what we're releasing
+        echo "Release assets:"
+        ls -lh release/
+
+    - name: Generate checksums
+      run: |
+        cd release
+        sha256sum * > SHA256SUMS
+        cat SHA256SUMS
+
+    - name: Extract version from tag
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Release version: $VERSION"
+
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        cat > release_notes.md << 'EOF'
+        ## Installation
+        
+        Download the appropriate binary for your platform:
+        
+        ### Linux (x86_64)
+        ```bash
+        # Python 3.12 (recommended)
+        curl -LO https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dip-linux-py3.12
+        chmod +x dip-linux-py3.12
+        sudo mv dip-linux-py3.12 /usr/local/bin/dip
+        ```
+        
+        ### macOS (Intel)
+        ```bash
+        # Python 3.12 (recommended)
+        curl -LO https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dip-macos-x86_64-py3.12
+        chmod +x dip-macos-x86_64-py3.12
+        sudo mv dip-macos-x86_64-py3.12 /usr/local/bin/dip
+        ```
+        
+        ### macOS (Apple Silicon)
+        ```bash
+        # Python 3.12 (recommended)
+        curl -LO https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dip-macos-arm64-py3.12
+        chmod +x dip-macos-arm64-py3.12
+        sudo mv dip-macos-arm64-py3.12 /usr/local/bin/dip
+        ```
+        
+        ### Verify Installation
+        ```bash
+        dip --version
+        dip --help
+        ```
+        
+        ## Checksums
+        
+        Verify your download with SHA256:
+        ```bash
+        sha256sum -c SHA256SUMS
+        ```
+        
+        EOF
+        
+        echo "notes_file=release_notes.md" >> $GITHUB_OUTPUT
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: release/*
+        body_path: ${{ steps.release_notes.outputs.notes_file }}
+        draft: false
+        prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+        generate_release_notes: true
+        fail_on_unmatched_files: true
+        make_latest: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Post release summary
+      run: |
+        cat >> $GITHUB_STEP_SUMMARY << EOF
+        ## Release Published! 🎉
+        
+        **Version**: ${{ steps.version.outputs.version }}
+        **Tag**: \`${{ github.ref_name }}\`
+        
+        ### Released Binaries
+        
+        $(ls -1 release/ | grep -v SHA256SUMS | awk '{print "- " $1}')
+        
+        ### Links
+        
+        - [Release Page](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }})
+        - [All Releases](https://github.com/${{ github.repository }}/releases)
+        
+        EOF
+
+  # Job 3: Test release (smoke test after release)
+  test-release:
+    name: Test Released Binaries
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+    - name: Download release binary
+      run: |
+        if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+          BINARY_NAME="dip-linux-py3.12"
+        else
+          BINARY_NAME="dip-macos-x86_64-py3.12"
+        fi
+        
+        curl -LO "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${BINARY_NAME}"
+        chmod +x "${BINARY_NAME}"
+        mv "${BINARY_NAME}" dip
+
+    - name: Test binary
+      run: |
+        ./dip --version
+        ./dip --help
+
+    - name: Verify checksums
+      run: |
+        curl -LO "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/SHA256SUMS"
+        
+        if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+          BINARY_NAME="dip-linux-py3.12"
+        else
+          BINARY_NAME="dip-macos-x86_64-py3.12"
+        fi
+        
+        grep "$BINARY_NAME" SHA256SUMS | sha256sum -c -

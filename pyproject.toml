@@ -1,0 +1,25 @@
+[project]
+name = "dip"
+version = "2.0.0-alpha.1"
+description = "A Python-based tool for simplifying Docker development workflows"
+requires-python = ">=3.8"
+dependencies = [
+    "rich>=14.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "setuptools>=80.0.0",
+    "shiv>=1.0.8",
+]
+
+[project.scripts]
+dip = "dip:main"
+
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["dip"]
+package-dir = {"" = "src"}

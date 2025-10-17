@@ -1,0 +1,56 @@
+name: Version Check
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-version:
+    name: Check Version Bump
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout PR branch
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get current version
+      id: current_version
+      run: |
+        VERSION=$(grep "^version = " pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Current version: $VERSION"
+
+    - name: Checkout main branch
+      run: |
+        git fetch origin main
+        git checkout origin/main -- pyproject.toml || echo "pyproject.toml not in main yet"
+
+    - name: Get main version
+      id: main_version
+      run: |
+        if [ -f pyproject.toml ]; then
+          VERSION=$(grep "^version = " pyproject.toml | sed 's/version = "\(.*\)"/\1/' || echo "0.0.0")
+        else
+          VERSION="0.0.0"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Main version: $VERSION"
+
+    - name: Compare versions
+      run: |
+        CURRENT="${{ steps.current_version.outputs.version }}"
+        MAIN="${{ steps.main_version.outputs.version }}"
+        
+        if [ "$CURRENT" == "$MAIN" ]; then
+          echo "⚠️ Version not bumped in pyproject.toml"
+          echo "Current: $CURRENT"
+          echo "Main: $MAIN"
+          echo ""
+          echo "Please update the version in pyproject.toml before merging."
+          exit 1
+        else
+          echo "✅ Version bumped from $MAIN to $CURRENT"
+        fi
