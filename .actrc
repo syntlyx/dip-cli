@@ -13,7 +13,11 @@
 # Enable verbose output by default
 # --verbose
 
-# Performance optimizations
---reuse                              # Reuse containers for faster runs
---container-architecture linux/amd64 # Explicit architecture
---bind                               # Bind working directory
+# Container architecture
+--container-architecture linux/amd64
+
+# Reuse containers for faster subsequent runs
+--reuse
+
+# Bind working directory
+--bind

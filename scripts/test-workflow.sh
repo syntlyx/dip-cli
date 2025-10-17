@@ -152,7 +152,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --platform)
-            PLATFORM="--platform $2"
+            PLATFORM="--matrix os:$2"
             shift 2
             ;;
         --skip-check)
@@ -175,6 +175,10 @@ main() {
     # Check requirements
     check_act
 
+    # Clean build artifacts to avoid conflicts
+    log_info "Cleaning build artifacts to avoid parallel execution conflicts..."
+    make clean
+
     # Check for uncommitted changes unless skipped
     if [ "$SKIP_CHECK" = false ]; then
         check_uncommitted
@@ -193,23 +197,25 @@ main() {
     # Default to empty job (runs all)
     JOB="${JOB:-}"
 
-    # Build act command
-    ACT_CMD="act"
+    # Determine event type and build act command
+    EVENT_TYPE="push"  # Default event
+    JOB_FLAG=""
+    EVENT_FILE=""
 
     # Add job if specified
     if [ -n "$JOB" ]; then
         case "$JOB" in
             build)
-                ACT_CMD="$ACT_CMD -j build"
+                JOB_FLAG="-j build"
                 EVENT_FILE=".github/act-events/push.json"
                 ;;
             release)
-                ACT_CMD="$ACT_CMD -j release"
+                JOB_FLAG="-j release"
                 EVENT_FILE=".github/act-events/tag-push.json"
                 log_warn "Testing release job with tag event"
                 ;;
             test-release)
-                ACT_CMD="$ACT_CMD -j test-release"
+                JOB_FLAG="-j test-release"
                 EVENT_FILE=".github/act-events/tag-push.json"
                 ;;
             all)
@@ -226,15 +232,21 @@ main() {
         EVENT_FILE=".github/act-events/push.json"
     fi
 
-    # Add event file
-    if [ -n "$EVENT_FILE" ]; then
-        ACT_CMD="$ACT_CMD -e $EVENT_FILE"
+    # Limit to single platform for local testing (avoid parallel conflicts)
+    if [ -z "$PLATFORM" ]; then
+        log_error "Platform flag '--platform' is required to avoid running parallel job conflicts."
+        exit 1
     fi
 
-    # Add optional flags
+    ACT_CMD="act $EVENT_TYPE $PLATFORM"
+
+
+    [ -n "$JOB_FLAG" ] && ACT_CMD="$ACT_CMD $JOB_FLAG"
+
+    [ -n "$EVENT_FILE" ] && ACT_CMD="$ACT_CMD -e $EVENT_FILE"
+
     [ -n "$DRY_RUN" ] && ACT_CMD="$ACT_CMD $DRY_RUN"
     [ -n "$VERBOSE" ] && ACT_CMD="$ACT_CMD $VERBOSE"
-    [ -n "$PLATFORM" ] && ACT_CMD="$ACT_CMD $PLATFORM"
 
     # Show what we're running
     log_step "Running test"
