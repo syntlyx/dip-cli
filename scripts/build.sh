@@ -6,9 +6,9 @@ source "./scripts/utils/logging.sh"
 ##
 # Configuration
 ##
+TARGET_PY="3.12"
 PYTHON="${PYTHON:-python3}"
 VENV_DIR=".venv"
-BUILD_DIR="build"
 DIST_DIR="dist"
 SCRIPT_NAME="dip"
 ENTRY_POINT="dip:main"
@@ -30,7 +30,7 @@ trap cleanup EXIT
 ##
 check_python() {
     if ! command -v "$PYTHON" &> /dev/null; then
-        error_exit "Python not found. Please install Python 3.8 or higher."
+        log_error "❌ Python 3 not found. Please install Python $TARGET_PY or higher."
     fi
 
     PYTHON_VERSION=$($PYTHON --version 2>&1 | awk '{print $2}')
@@ -95,9 +95,9 @@ main() {
     check_source_dir
 
     log_step "Cleaning previous builds"
-    rm -rf "$BUILD_DIR" "$DIST_DIR"
+    rm -rf "$DIST_DIR"
     mkdir -p "$DIST_DIR"
-    log_info "Cleaned $BUILD_DIR and $DIST_DIR directories"
+    log_info "Cleaned $DIST_DIR directories"
 
     log_step "Setting up virtual environment"
     if [ -d "$VENV_DIR" ]; then
@@ -144,7 +144,7 @@ main() {
     log_step "Copying source files"
     if [ -d "$SOURCE_DIR" ]; then
         cp -r "$SOURCE_DIR"/* "$TEMP_BUILD_DIR/" || error_exit "Failed to copy source files"
-        log_info "Copied files from $SOURCE_DIR to build directory"
+        log_info "Copied files from $SOURCE_DIR to temp build directory"
     else
         error_exit "Source directory $SOURCE_DIR not found"
     fi
@@ -164,9 +164,6 @@ main() {
     BINARY_MD5=$(md5sum "$DIST_DIR/$SCRIPT_NAME" 2>/dev/null | cut -d' ' -f1 || md5 -q "$DIST_DIR/$SCRIPT_NAME" 2>/dev/null)
 
     log_info "Build complete!"
-    log_info "Binary location: $DIST_DIR/$SCRIPT_NAME"
-    log_info "Binary size: $BINARY_SIZE"
-    [ -n "$BINARY_MD5" ] && log_info "MD5 checksum: $BINARY_MD5"
 
     log_step "Testing binary"
     if "$DIST_DIR/$SCRIPT_NAME" --help &> /dev/null; then

@@ -102,8 +102,8 @@ create_event_files() {
 {
   "ref": "refs/heads/main",
   "repository": {
-    "name": "dipcli",
-    "full_name": "syntlyx/dipcli"
+    "name": "dip-cli",
+    "full_name": "syntlyx/dip-cli"
   }
 }
 EOF
@@ -114,10 +114,10 @@ EOF
     if [ ! -f .github/act-events/tag-push.json ]; then
         cat > .github/act-events/tag-push.json << 'EOF'
 {
-  "ref": "refs/tags/v2.0.0-alpha.1",
+  "ref": "refs/tags/v2.0.0-alpha.2",
   "repository": {
-    "name": "dipcli",
-    "full_name": "syntlyx/dipcli"
+    "name": "dip-cli",
+    "full_name": "syntlyx/dip-cli"
   }
 }
 EOF

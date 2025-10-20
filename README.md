@@ -2,48 +2,33 @@
 
 > A Python-based PROTOTYPE tool for simplifying Docker development workflows
 
-[![Build and Release](https://github.com/syntlyx/dip-cli/actions/workflows/build-and-release.yml/badge.svg)](https://github.com/syntlyx/dip-cli/actions/workflows/build-and-release.yml)
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/syntlyx/dip-cli)](https://github.com/syntlyx/dip-cli/releases/latest)
-[![License](https://img.shields.io/github/license/syntlyx/dip-cli)](LICENSE)
+[![Builds](https://github.com/syntlyx/dip-cli/actions/workflows/build-and-release.yml/badge.svg)](https://github.com/syntlyx/dip-cli/actions/workflows/build-and-release.yml)
+[![Latest Release](https://img.shields.io/github/v/release/syntlyx/dip-cli)](https://github.com/syntlyx/dip-cli/releases/latest)
+[![License](https://img.shields.io/github/license/syntlyx/dip-cli)](LICENSE.md)
+
+**⚠️ Warning**: This is a prototype implemented for personal and educational use-case. Use at your own risk! 
 
 ## Features
 
-- ✨ Built with [Rich](https://github.com/Textualize/rich) for beautiful terminal output
 - 📦 Single binary distribution with [shiv](https://github.com/linkedin/shiv)
+- ✨ Built with [Rich](https://github.com/Textualize/rich) for beautiful terminal output
 - 🚀 Fast and lightweight
 - 🔒 Secure with SHA256 checksums
-- 🐍 Supports Python 3.9+
+- 🐍 Supports Python 3.12+
 
 ## Installation
 
-### Quick Install (Recommended)
+### Quick Install
 
-**Linux:**
 ```bash
-curl -L https://github.com/syntlyx/dip-cli/releases/latest/download/dip-linux-py3.12 -o dip
-chmod +x dip
-sudo mv dip /usr/local/bin/
-```
-
-**macOS (Intel):**
-```bash
-curl -L https://github.com/syntlyx/dip-cli/releases/latest/download/dip-macos-x86_64-py3.12 -o dip
-chmod +x dip
-sudo mv dip /usr/local/bin/
-```
-
-**macOS (Apple Silicon):**
-```bash
-curl -L https://github.com/syntlyx/dip-cli/releases/latest/download/dip-macos-arm64-py3.12 -o dip
-chmod +x dip
-sudo mv dip /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/syntlyx/dip-cli/main/scripts/install.sh | bash
 ```
 
 ### From Source
 
 ```bash
 git clone https://github.com/syntlyx/dip-cli.git
-cd dipcli
+cd dip-cli
 make install
 ```
 
@@ -57,7 +42,7 @@ dip --help
 dip --version
 
 # Run commands
-dip system
+dip sysinfo
 dip start
 dip stop
 dip restart
@@ -75,7 +60,7 @@ dip exec [custom command]
 ```bash
 # Clone the repository
 git clone https://github.com/syntlyx/dip-cli.git
-cd dipcli
+cd dip-cli
 
 # Set up development environment
 make dev-install
@@ -95,33 +80,33 @@ make clean
 ### Testing During Development
 
 ```bash
-# Quick test (no build needed)
-make dev-run
-
-# Or run directly
+# Direct execution
 python3 src/dip/__init__.py [arguments...]
 
-# With editable install (changes reflected immediately)
+# Using venv
 source .venv/bin/activate
 dip [arguments...]
+
+# Installing local build
+make install
 ```
 
-## Release Process
+## MIT License
 
-See [RELEASING.md](RELEASING.md) for detailed release instructions.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-**Quick release:**
-```bash
-# 1. Update version in pyproject.toml
-# 2. Commit changes
-git add pyproject.toml src/dip/__init__.py
-git commit -m "Bump version to 1.2.3"
-git push origin main
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-# 3. Create release
-./scripts/release.sh
-```
-
-## License
-
-[MIT License](LICENSE)
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
