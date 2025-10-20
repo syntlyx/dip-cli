@@ -173,28 +173,9 @@ jobs:
         
         Download the appropriate binary for your platform:
         
-        ### Linux (x86_64)
+        ### Quick Install
         ```bash
-        # Python 3.12 (recommended)
-        curl -LO https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dip-linux-py3.12
-        chmod +x dip-linux-py3.12
-        sudo mv dip-linux-py3.12 /usr/local/bin/dip
-        ```
-        
-        ### macOS (Intel)
-        ```bash
-        # Python 3.12 (recommended)
-        curl -LO https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dip-macos-x86_64-py3.12
-        chmod +x dip-macos-x86_64-py3.12
-        sudo mv dip-macos-x86_64-py3.12 /usr/local/bin/dip
-        ```
-        
-        ### macOS (Apple Silicon)
-        ```bash
-        # Python 3.12 (recommended)
-        curl -LO https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dip-macos-arm64-py3.12
-        chmod +x dip-macos-arm64-py3.12
-        sudo mv dip-macos-arm64-py3.12 /usr/local/bin/dip
+        curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | bash
         ```
         
         ### Verify Installation
