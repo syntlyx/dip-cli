@@ -40,6 +40,7 @@ class CliManager:
     self.config_dir = Path(os.getenv('XDG_CONFIG_HOME', home_dir / '.config')) / config.bin_name
     self.data_dir = Path(os.getenv('XDG_DATA_HOME', home_dir / '.local/share')) / config.bin_name
     self.cache_dir = Path(os.getenv('XDG_CACHE_HOME', home_dir / '.cache')) / config.bin_name
+    self.traefik_dir = self.config_dir / "traefik"
 
     icon = f"[bold green]{self.output.icon('ok')}[/bold green]"
     self.output.verbose_panel(
@@ -718,7 +719,7 @@ class CliManager:
     if self.is_traefik_running():
       return
 
-    compose_file: Path = self.config_dir / "traefik" / "docker-compose.yml"
+    compose_file: Path = self.traefik_dir / "docker-compose.yml"
 
     if not compose_file.exists():
       self.output.error(f"Traefik `docker-compose.yml` file not found: {compose_file}")
@@ -739,7 +740,7 @@ class CliManager:
       self.output.info("Traefik is not running")
       return
 
-    compose_file: Path = self.config_dir / "traefik" / "docker-compose.yml"
+    compose_file: Path = self.traefik_dir / "docker-compose.yml"
 
     if not compose_file.exists():
       self.output.error(f"Traefik `docker-compose.yml` file not found: {compose_file}")
@@ -755,3 +756,270 @@ class CliManager:
     if sys.platform == "linux" and not self.is_traefik_running():
       self.start_traefik()
 
+  def traefik_config(self, service: str, domain: str, port: str = '80'):
+    """Traefik config"""
+    self.get_container_id(service)
+
+    self.output.info(f"Append this to your [bold]{service}[/bold] service in the [cyan].dip/docker-compose.yml[/cyan]")
+    self.output.console.print(
+      f"""
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.{service}.rule=Host(`{domain}`)
+      - traefik.http.routers.{service}.entrypoints=websecure
+      - traefik.http.routers.{service}.tls=true
+      - traefik.http.services.{service}.loadbalancer.server.port={port}
+    networks:
+      - traefik_proxy
+""")
+    self.output.warning(f"Stop and start sequence is required:")
+    self.output.console.print(
+      f"  dip stop\n"
+      f"  dip start"
+    )
+
+  def mkcert(self, domain: str):
+    self.output.info(f"Generating certificate for: [cyan]{domain}[/cyan]")
+    domain_filename = domain.replace('*', 'wildcard').replace('.', '-')
+    base_domain = domain.replace('*.', '') if '*' in domain else f"www.{domain}"
+    certs_dir: Path = self.traefik_dir / "certs"
+    certs_dir.mkdir(parents=True, exist_ok=True)
+    self.output.info(f"Output directory: {certs_dir}")
+
+    # Certificate chain files
+    ca_key_file: Path = certs_dir / "ca-key.pem"
+    ca_cert_file: Path = certs_dir / "ca-cert.pem"
+    key_file: Path = certs_dir / f"{domain_filename}.key"
+    csr_file: Path = certs_dir / f"{domain_filename}.csr"
+    cert_file: Path = certs_dir / f"{domain_filename}.crt"
+    chain_file: Path = certs_dir / f"{domain_filename}-chain.crt"  # NEW: Full chain
+    config_file: Path = self.traefik_dir / "dynamic" / f"{domain_filename}.yml"
+
+    # Step 1: Create CA if it doesn't exist
+    if not ca_cert_file.exists():
+      self.output.info(f"Generating Certificate Authority (CA)")
+
+      result = subprocess.run(
+        ["openssl", "genrsa", "-out", ca_key_file, "4096"],
+        capture_output=True
+      )
+      if result.returncode != 0:
+        self.output.error(f"Failed to generate CA key: {result.stderr.decode().strip()}")
+        sys.exit(1)
+      os.chmod(ca_key_file, 0o600)
+
+      result = subprocess.run(
+        ["openssl", "req", "-new", "-x509", "-days", "3650",
+         "-key", ca_key_file, "-out", ca_cert_file,
+         "-subj", "/CN=Local Development CA/O=Development/OU=Certificate Authority"],
+        capture_output=True
+      )
+      if result.returncode != 0:
+        self.output.error(f"Failed to generate CA certificate: {result.stderr.decode().strip()}")
+        sys.exit(1)
+
+      self.output.success(f"CA Certificate created: [default]{ca_cert_file}")
+      self.output.warning(f"Import {ca_cert_file} to your system's trusted root certificates!")
+    else:
+      self.output.info(f"Using existing CA: {ca_cert_file}")
+
+    # Step 2: Generate server private key
+    self.output.info(f"Generating server private key")
+    result = subprocess.run(
+      ["openssl", "genrsa", "-out", key_file, "2048"],
+      capture_output=True
+    )
+    if result.returncode != 0:
+      self.output.error(f"Failed to generate private key: {result.stderr.decode().strip()}")
+      sys.exit(1)
+    os.chmod(key_file, 0o600)
+    self.output.success(f"Private key: [default]{key_file}")
+
+    # Step 3: Create CSR (Certificate Signing Request)
+    country = "US"
+    state = "NC"
+    locality = "Wilmington"
+
+    response = input("Country Name (2 letter code) [US]: ")
+    if response:
+      country = response.strip()
+    response = input("State or Province Name (full name) [NC]: ")
+    if response:
+      state = response.strip()
+    response = input("Locality Name (eg, city) [Wilmington]: ")
+    if response:
+      locality = response.strip()
+
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.cnf') as f:
+      tmpcfg: Path = Path(f.name)
+
+    tmpcfg.write_text(f"""[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+
+[dn]
+C={country}
+ST={state}
+L={locality}
+O=Development
+OU=Local Development
+CN={domain}
+""")
+
+    self.output.info(f"Generating Certificate Signing Request (CSR)")
+    result = subprocess.run(
+      ["openssl", "req", "-new", "-key", key_file,
+       "-out", csr_file, "-config", tmpcfg],
+      capture_output=True
+    )
+    os.remove(tmpcfg)
+    if result.returncode != 0:
+      self.output.error(f"Failed to generate CSR: {result.stderr.decode().strip()}")
+      sys.exit(1)
+
+
+    # Step 4: Create extensions file for SAN
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.ext') as f:
+      tmpext: Path = Path(f.name)
+
+    tmpext.write_text(f"""basicConstraints = CA:FALSE
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = {domain}
+DNS.2 = {base_domain}
+""")
+
+    # Step 5: Sign the certificate with CA
+    self.output.info(f"Signing certificate with CA")
+    result = subprocess.run(
+    ["openssl", "x509", "-req", "-days", "365",
+     "-in", csr_file,
+     "-CA", ca_cert_file,
+     "-CAkey", ca_key_file,
+     "-CAcreateserial",
+     "-out", cert_file,
+     "-extfile", tmpext],
+      capture_output=True
+    )
+    os.remove(tmpext)
+    if result.returncode != 0:
+      self.output.error(f"Failed to sign certificate: {result.stderr.decode().strip()}")
+      sys.exit(1)
+
+
+    # Clean up CSR (no longer needed)
+    if csr_file.exists():
+      os.remove(csr_file)
+
+    self.output.success(f"Certificate: [default]{cert_file}")
+
+    # Step 6: Create full chain certificate (server cert + CA cert)
+    self.output.info(f"Creating certificate chain")
+    with open(chain_file, 'w') as outfile:
+      with open(cert_file, 'r') as infile:
+        outfile.write(infile.read())
+      with open(ca_cert_file, 'r') as infile:
+        outfile.write(infile.read())
+
+    self.output.success(f"Full chain certificate: [default]{chain_file}")
+
+    # Step 7: Generate Traefik configuration
+    self.output.info(f"Generating Traefik configuration")
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+
+    config_file.write_text(f"""# Traefik TLS configuration for {domain}
+tls:
+  certificates:
+    - certFile: /certs/{chain_file.name}
+      keyFile: /certs/{key_file.name}
+      stores:
+        - default
+
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/{chain_file.name}
+        keyFile: /certs/{key_file.name}
+""")
+    self.output.success(f"Traefik config: [default]{config_file}")
+
+    result = subprocess.run(
+      ["openssl", "x509", "-in", cert_file,
+       "-noout", "-subject", "-issuer", "-dates"],
+      capture_output=True, text=True
+    )
+    certinfo = ''
+    if result.returncode == 0:
+      certinfo = result.stdout.strip()
+
+    self.output.info(f"Verifying certificate chain")
+    result = subprocess.run(
+      ["openssl", "verify", "-CAfile", ca_cert_file, cert_file],
+      capture_output=True, text=True
+    )
+    if result.returncode != 0:
+      self.output.warning(f"Verification: {result.stderr.strip()}")
+
+    self.output.info(f"Verifying full chain certificate")
+    result = subprocess.run(
+      ["openssl", "verify", "-CAfile", ca_cert_file, chain_file],
+      capture_output=True, text=True
+    )
+    if result.returncode != 0:
+      self.output.warning(f"Full chain verification: {result.stderr.strip()}")
+
+    show_certs = f"""[bold cyan]Certificate Information:[/bold cyan]
+{certinfo}
+
+[bold cyan]Location:[/bold cyan] {certs_dir}
+
+[bold cyan]Certificate Authority (CA):[/bold cyan]
+[green bold]▶[/green bold] Certificate: {ca_cert_file.name}
+[green bold]▶[/green bold] Private Key: {ca_key_file.name}
+
+[bold cyan]Server Certificate:[/bold cyan]
+[green bold]▶[/green bold] Certificate: {cert_file.name}
+[green bold]▶[/green bold] Chain: {chain_file.name}
+[green bold]▶[/green bold] Private Key: {key_file.name}
+"""
+    self.output.console.print(Panel(
+      show_certs,
+      title="[bold green]Certificate Generated Successfully[/bold green]",
+      border_style="green",
+      width=140
+    ))
+
+    instructions = f"""
+[bold yellow]⚠ IMPORTANT: Install the CA certificate on client devices[/bold yellow]
+
+[green bold]▶ CA Certificate:[/green bold] {ca_cert_file}
+
+[bold]• macOS:[/bold]
+  sudo security add-trusted-cert -d -r trustRoot \\
+    -k /Library/Keychains/System.keychain \\
+    {ca_cert_file}
+
+  Or use Keychain Access GUI:
+    1. Import {ca_cert_file}
+    2. Double-click → Trust → 'Always Trust'
+
+[bold]• Linux (Ubuntu/Debian):[/bold]
+  cd {certs_dir}
+  sudo cp {ca_cert_file.name} /usr/local/share/ca-certificates/{domain_filename}.crt
+  sudo update-ca-certificates
+
+[bold]• Linux (Fedora/RHEL):[/bold]
+  cd {certs_dir}
+  sudo cp {ca_cert_file.name} /etc/pki/ca-trust/source/anchors/
+  sudo update-ca-trust
+"""
+    self.output.console.print(Panel(
+      instructions,
+      title="[bold yellow]Install the CA certificate[/bold yellow]",
+      width=140
+    ))

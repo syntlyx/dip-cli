@@ -165,11 +165,10 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/traefik.yml:ro
+      - ./certs:/certs:ro
       - ./dynamic:/dynamic:ro
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.traefik.entrypoints=http"
-      - "traefik.http.routers.traefik.rule=Host(`traefik.local`)"
 
 networks:
   traefik_proxy:
@@ -181,12 +180,21 @@ EOF
     cat > /tmp/traefik.yml << 'EOF'
 api:
   dashboard: true
-  insecure: true
 
 entryPoints:
-  http:
+  web:
     address: ":80"
-  https:
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+    observability:
+      accessLogs: false
+      metrics: false
+      tracing: false
+  websecure:
     address: ":443"
 
 providers:
@@ -199,39 +207,36 @@ providers:
     watch: true
 
 log:
+  filePath: "/var/log/traefik.log"
   level: INFO
 
-accessLog: {}
+accessLog:
+  filePath: "/var/log/traefik-access.log"
 EOF
 
     # Create dynamic middlewares
-#    cat > /tmp/middlewares.yml << 'EOF'
-#http:
-#  middlewares:
-#    https-redirect:
-#      redirectScheme:
-#        scheme: https
-#        permanent: true
-#
-#    default-headers:
-#      headers:
-#        frameDeny: true
-#        browserXssFilter: true
-#        contentTypeNosniff: true
-#
-#    secure-headers:
-#      headers:
-#        sslRedirect: true
-#        stsSeconds: 31536000
-#        stsIncludeSubdomains: true
-#        stsPreload: true
-#EOF
+    cat > /tmp/middlewares.yml << 'EOF'
+http:
+  middlewares:
+    default-headers:
+      headers:
+        frameDeny: true
+        browserXssFilter: true
+        contentTypeNosniff: true
+
+    secure-headers:
+      headers:
+        sslRedirect: true
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+EOF
 
     # Copy config files
     mkdir -p "${CONFIG_DIR}/traefik/dynamic"
     cp /tmp/traefik-compose.yml "${CONFIG_DIR}/traefik/docker-compose.yml"
     cp /tmp/traefik.yml "${CONFIG_DIR}/traefik/traefik.yml"
-    # cp /tmp/middlewares.yml "${CONFIG_DIR}/traefik/dynamic/middlewares.yml"
+    cp /tmp/middlewares.yml "${CONFIG_DIR}/traefik/dynamic/middlewares.yml"
 
     # Clean up temp files
     rm -f /tmp/traefik-compose.yml /tmp/traefik.yml /tmp/middlewares.yml

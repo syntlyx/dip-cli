@@ -31,7 +31,7 @@ SOFTWARE.
 # Metadata
 ##
 
-__version__ = "2.0.0-alpha.2"
+__version__ = "2.0.0-alpha.3"
 __status__ = "Prototype" # Options: "Development", "Production", "Prototype"
 
 __license__ = "MIT"
@@ -72,6 +72,11 @@ def create_parser() -> argparse.ArgumentParser:
   traefik_parser = subparsers.add_parser('traefik', help='Manage Traefik proxy')
   traefik_parser.add_argument('action', choices=['start', 'stop', 'status', 'restart', 'reset'])
 
+  traefik_generate_parser = subparsers.add_parser('traefik-label', help='Generate docker-compose config for traefik')
+  traefik_generate_parser.add_argument('service', help='Service name')
+  traefik_generate_parser.add_argument('host', help='Host name')
+  traefik_generate_parser.add_argument('--port', help='Port (default: 80)', dest='port', default='80')
+
   # Shell command (with backward-compatible bash alias)
   shell_parser = subparsers.add_parser('shell', aliases=['sh'], help='Enter shell in a container')
   shell_parser.add_argument('service', help='Service name')
@@ -94,6 +99,9 @@ def create_parser() -> argparse.ArgumentParser:
                            choices=['bash', 'sh', 'zsh', 'fish'],
                            default='bash',
                            help='Shell to use for command execution (default: bash)')
+
+  mkcert_parser = subparsers.add_parser('mkcert', help='Generate self-signed certificate for local development and configure Traefik')
+  mkcert_parser.add_argument('domain', help='Domain name (e.g., *.locallan, app.local, *.dev)')
 
   # DB commands
   db_parser = subparsers.add_parser('db', help='Database operations')
@@ -178,8 +186,12 @@ def main():
   ##
   # Traefik management
   ##
-  if args.command == 'traefik':
+  elif args.command == 'traefik':
     dip.traefik(args.action)
+  elif args.command == 'traefik-label':
+    dip.traefik_config(args.service, args.host, args.port)
+  elif args.command == 'mkcert':
+    dip.mkcert(args.domain)
 
   ##
   # Commands' execution

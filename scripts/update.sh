@@ -11,6 +11,14 @@ REPO_OWNER="syntlyx"
 REPO_NAME="dip-cli"
 
 ##
+# Installation directories following XDG directory specifications
+##
+BIN_DIR="${HOME}/.local/bin"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dip"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/dip"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/dip"
+
+##
 # Colors
 ##
 GREEN='\033[0;32m'
@@ -45,7 +53,7 @@ detect_installation() {
 # Get current version
 ##
 get_current_version() {
-    CURRENT_VERSION=$(dip --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+    CURRENT_VERSION=$(dip --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z]+\.[0-9]+)?' || echo "unknown")
     log_info "Current version: $CURRENT_VERSION"
 }
 
@@ -86,7 +94,7 @@ backup_current() {
     BACKUP_DIR="/tmp/dip-backup-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$BACKUP_DIR"
 
-    cp "$DIP_PATH" "$BACKUP_DIR/dip"
+    cp -r "$CONFIG_DIR" "$BACKUP_DIR/dip"
 
     log_info "Backup created: $BACKUP_DIR/dip"
 }
@@ -115,7 +123,7 @@ update_binary() {
 verify_update() {
     log_step "Verifying update"
 
-    NEW_VERSION=$(dip --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+    NEW_VERSION=$(dip --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z]+\.[0-9]+)?' || echo "unknown")
 
     if [ "$NEW_VERSION" = "$LATEST_VERSION" ]; then
         log_info "Successfully updated to v$NEW_VERSION ✓"

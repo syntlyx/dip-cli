@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0-alpha.3] - 2025-10-20
+
+- Added traefik TSL configuration
+- Added `mkcert` command to generate CA certificate and local domain certificate
+- Added temporary command `traefik-label` to get docker-compose.yml config for container to connect traefik
+
 ## [2.0.0-alpha.2] - 2025-10-20
 
 - Refactored core, split code into separate files
@@ -19,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Actions CI/CD pipeline
 - Multi-platform builds (Linux, macOS Intel, macOS ARM)
 
-[unreleased]: https://github.com/olivierlacan/keep-a-changelog/compare/v2.0.0-alpha.2...HEAD
+[unreleased]: https://github.com/olivierlacan/keep-a-changelog/compare/v2.0.0-alpha.3...HEAD
+[2.0.0-alpha.3]: https://github.com/syntlyx/dip-cli/releases/tag/v2.0.0-alpha.3
 [2.0.0-alpha.2]: https://github.com/syntlyx/dip-cli/releases/tag/v2.0.0-alpha.2
 [2.0.0-alpha.1]: https://github.com/syntlyx/dip-cli/releases/tag/v2.0.0-alpha.1

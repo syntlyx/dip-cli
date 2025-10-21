@@ -53,6 +53,28 @@ dip bash # Alias for shell --type=bash
 dip exec [custom command]
 ```
 
+### Generate CA Certificate
+
+To generate certificate for the traefik proxy:
+
+```bash
+dip mkcert --help
+
+# Generate certificate for you domain
+dip mkcert *.your-domain.lan
+
+# Install generated CA certificate on client devices (requires only the first time)
+
+# Generate certificate for another domain
+dip mkcert *.another-domain.lan
+# No need to to install another certificate
+
+# Get docker-compose config for your container
+dip traefik-label --help
+
+dip traefik-label myapp myapp.your-domain.lan
+```
+
 ## Development
 
 ### Setup
