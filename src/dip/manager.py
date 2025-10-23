@@ -1,4 +1,4 @@
-
+import json
 import os
 import re
 import sys
@@ -17,6 +17,7 @@ from rich.tree import Tree
 from rich import box
 
 from dip.config import config
+from dip.models import DockerContainer, DockerNetwork
 from dip.output import Output
 from dip.project import ProjectConfig, load_project
 
@@ -127,27 +128,13 @@ class CliManager:
     sys.exit(1)
 
 
-  def get_container_id(self, service: str, no_error: bool = False) -> Optional[str]:
+  def get_container(self, service: str, no_error: bool = False) -> Optional[DockerContainer]:
     """Get container ID for a service"""
-    self.is_running()
-    self.load_project()
+    containers = self.get_containers()
 
-    name = self.project.project_name
-    patterns = [
-      f"{name}-{service}-",
-      f"{name}_{service}_",
-      service
-    ]
-
-    self.output.debug(f"Looking for container with name: {service}")
-
-    for pattern in patterns:
-      self.output.debug(f"Trying pattern: {pattern}")
-      result = self.docker(["ps", "-q", "--filter", f"name={pattern}"])
-      if result.stdout.strip():
-        container_id = result.stdout.strip().split()[0]
-        self.output.debug(f"Found container ID: {container_id}")
-        return container_id
+    for cntr in containers:
+      if cntr.service == service:
+        return cntr
 
     if not no_error:
       self.output.error(f"Container for service '{service}' not found")
@@ -155,6 +142,89 @@ class CliManager:
 
     self.output.debug(f"No container found for service: {service}")
     return None
+
+  def get_containers(self, running: bool = False) -> list[DockerContainer]:
+    self.is_running()
+    self.load_project()
+    def get_name(name: str) -> Optional[str]:
+      try:
+        service_name = self.docker(
+          ["inspect", name, "--format", '{{index .Config.Labels "com.docker.compose.service"}}'],
+          capture_output=True,
+          text=True,
+          check=True
+        ).stdout.strip()
+        return service_name if service_name else None
+
+      except subprocess.CalledProcessError:
+        return None
+    try:
+      result = self.docker([
+        "ps", "-a", "--filter", f"name={self.project.project_name}",
+        "--format", "{{json .}}"
+      ])
+      containers: list[DockerContainer] = []
+      for line in result.stdout.strip().split('\n'):
+        if not line:
+          continue
+        data = json.loads(line)
+        name = get_name(data.get('Names', ''))
+        container = DockerContainer.from_dict(name, data);
+        if not running or container.status == 'running':
+          containers.append(container)
+      return containers
+
+    except subprocess.CalledProcessError as e:
+      self.output.error(f"Command failed with exit code {e.returncode}: {e.stderr}")
+      return []
+
+  def get_networks(self, project_name: str) -> list[DockerNetwork]:
+    """Get all networks for a Docker Compose project."""
+    try:
+      result = self.docker([
+          "network", "ls",
+          "--filter", f"label=com.docker.compose.project={project_name}",
+          "--format", '{{json .}}'
+        ],
+        check=True
+      )
+
+      networks = []
+      for line in result.stdout.strip().split('\n'):
+        if line:
+          data = json.loads(line)
+          networks.append(DockerNetwork.from_dict(data))
+
+      return networks
+
+    except subprocess.CalledProcessError as e:
+      self.output.error(f"Error getting networks: {e.stderr}")
+      return []
+    except json.JSONDecodeError as e:
+      self.output.error(f"Error parsing JSON: {e}")
+      return []
+
+  def inspect_network(self, network_id_or_name: str) -> Optional[dict]:
+    """Get detailed network information."""
+    try:
+      result = self.docker(["docker", "network", "inspect", network_id_or_name], check=True)
+      data = json.loads(result.stdout)
+      return data[0] if data else None
+
+    except subprocess.CalledProcessError as e:
+      self.output.error(f"Error disconnecting network: {e.stderr}")
+    except json.JSONDecodeError as e:
+      self.output.error(f"Error disconnecting network: {e}")
+    return None
+
+  def disconnect_network(self, network_id_or_name: str):
+    try:
+      result = self.docker(["ps", "-aq", "--no-trunc", "--filter", f"network={network_id_or_name}"], check=True)
+      for container_id in result.stdout.strip().split('\n'):
+        self.docker(["network", "disconnect", "-f", network_id_or_name, container_id])
+    except subprocess.CalledProcessError as e:
+      self.output.error(f"Error disconnecting network: {e.stderr}")
+      sys.exit(e.returncode)
 
   # --------------------------------------
   # Container Information
@@ -199,34 +269,21 @@ class CliManager:
   def status(self):
     """Show container status"""
     self.load_project()
-    result = self.docker([
-      "ps", "-a", "--filter", f"name={self.project.project_name}",
-       "--format", "{{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Ports}}"
-    ])
-
-    if not result.stdout.strip():
+    containers = self.get_containers()
+    if not len(containers):
       self.output.warning("No containers found")
       return
 
-    table = Table(title=f"Project: {self.project.project_name}", title_justify="left", box=box.ROUNDED)
+    table = Table(title=f"Project: {self.project.project_name}",
+                  title_justify="left",
+                  box=box.ROUNDED)
     table.add_column("ID", no_wrap=True)
     table.add_column("Name", style="cyan", no_wrap=True)
     table.add_column("Status", style="magenta")
     table.add_column("Ports")
 
-    for line in result.stdout.strip().split('\n'):
-      parts = line.split('\t')
-      if len(parts) >= 2:
-        status = parts[2]
-        ports = parts[3] if len(parts) > 3 else ""
-        if "Up" in status:
-          status = f"[green]{status}[/green]"
-        elif "Exited" in status:
-          status = f"[red]{status}[/red]"
-        else:
-          status = f"[yellow]{status}[/yellow]"
-
-        table.add_row(parts[0], parts[1], status, ports)
+    for contr in containers:
+      table.add_row(contr.id, contr.names, contr.status, contr.ports)
 
     self.output.console.print(table)
 
@@ -242,29 +299,28 @@ class CliManager:
   def stats(self, service: Optional[str] = None):
     """Show container resource usage"""
     if service:
-      container_id = self.get_container_id(service)
+      container = self.get_container(service)
       self.output.info(f"Showing stats for service: {service}")
-      self.docker(["stats", container_id], capture_output=False)
+      self.docker(["stats", container.id], capture_output=False)
     else:
       self.docker(["stats"], capture_output=False)
 
   def top(self, service: Optional[str] = None):
     """Show running processes in containers"""
     if service:
-      container_id = self.get_container_id(service)
+      container = self.get_container(service)
       self.output.info(f"Running processes in {service} container:")
-      self.docker(["top", container_id], capture_output=False)
+      self.docker(["top", container.id], capture_output=False)
     else:
       self.load_project()
       self.output.info(f"Running processes for {self.project.project_name} containers:")
-      result = self.docker(["ps", "-q", "--filter", f"name={self.project.project_name}"])
-      containers = result.stdout.strip().split()
-      if not containers:
+      containers = self.get_containers(True)
+      if not len(containers):
         self.output.warning("No running containers found")
         return
 
       for container in containers:
-        name_result = self.docker(["ps", "--format", "{{.Names}}", "-f", f"id={container}"])
+        name_result = self.docker(["ps", "--format", "{{.Names}}", "-f", f"id={container.id}"])
         self.output.info(f"Container: {name_result.stdout.strip()}")
         self.docker(["top", container], capture_output=False)
         self.output.info("-" * 47)
@@ -352,22 +408,21 @@ class CliManager:
 
   def shell(self, service: str, shell_type: str = "bash"):
     """Enter shell in a container"""
-    container_id = self.get_container_id(service)
-    self.output.verbose(f"Entering {shell_type} in container: {container_id}")
-    if not self.is_shell_exists(container_id, shell_type):
+    container = self.get_container(service)
+    self.output.verbose(f"Entering {shell_type} in container: {container.service}")
+    if not self.is_shell_exists(container.id, shell_type):
       self.output.warning(f"{shell_type} not found in container, trying sh...")
       shell_type = "sh"
-      if not self.is_shell_exists(container_id, shell_type):
+      if not self.is_shell_exists(container.id, shell_type):
         self.output.error("No shell found in container")
         sys.exit(1)
 
-    self.docker(["exec", "-it", container_id, shell_type], capture_output=False, text=False)
+    self.docker(["exec", "-it", container.id, shell_type], capture_output=False, text=False)
 
-  def exec(self, service: str, command: tuple[str, ...], shell_type: str = "bash"):
+  def exec(self, service: str, command: list[str], shell_type: str = "bash"):
     """Execute a command in a container."""
-    container_id = self.get_container_id(service)
+    container = self.get_container(service)
 
-    # Calculate a relative path for a working directory
     cwd = Path.cwd()
     relative_path = cwd.relative_to(self.project.root_dir) if cwd.is_relative_to(self.project.root_dir) else Path()
     container_dest_path = Path(self.project.container_dir) / relative_path
@@ -376,20 +431,14 @@ class CliManager:
     self.output.debug(f"Command: {' '.join(command)}")
     self.output.debug(f"Shell: {shell_type}")
 
-    # Check if the specified shell exists
-    if not self.is_shell_exists(container_id, shell_type):
+    if not self.is_shell_exists(container.id, shell_type):
       self.output.debug(f"{shell_type} not found, falling back to sh")
       shell_type = "sh"
 
     result = self.docker([
-      "exec",
-      "-e", "COLUMNS",
-      "-e", "LINES",
-      "-it",
-      "-w", str(container_dest_path),
-      container_id,
-      shell_type, "-ilc",
-      " ".join(command)
+      "exec", "-e", "COLUMNS", "-e", "LINES",
+      "-it", "-w", str(container_dest_path),
+      container.id, shell_type, "-ilc", *command
     ], capture_output=False, text=False)
     if result.returncode != 0:
       self.output.error(f"Command exited with code: {result.returncode}")
@@ -462,11 +511,49 @@ class CliManager:
     self.compose(["up", "-d"], capture_output=False)
     self.output.success("Container reset completed")
 
-  def remove(self):
+  def remove(self, service: str | None):
     """Reset containers (stop, remove, start)"""
-    self.output.warning("Removing containers...")
-    self.compose(["rm", "-f"], capture_output=False)
-    self.output.success("Containers removed")
+    self.load_project()
+    if service is None:
+      containers = self.get_containers()
+
+      if not containers:
+        self.output.warning("No containers found")
+        return
+
+      self.output.warning(f"Removing containers and volumes of {self.project.project_name}?")
+      tree = Tree(f"[bold blue]◳ {self.project.project_name}[/bold blue]")
+      for contr in containers:
+        tree.add(f"[cyan]{contr.names}[/cyan]")
+      response = input(f"Continue [y/N] ")
+
+      if response.lower() != 'y':
+        self.output.warning("Operation cancelled")
+        return
+
+      with self.output.status(f"[yellow bold]Removing project resources...") as task:
+        for network in self.get_networks(self.project.project_name):
+          task.update(f"[yellow bold]Disconnecting {network.name} network from containers...")
+          self.disconnect_network(network.id)
+        task.update(f"[yellow bold]Removing containers and volumes of {self.project.project_name}...")
+        result = self.compose(["down", "--volumes", "--remove-orphans"])
+        if result.returncode != 0:
+          self.output.error("Failed to remove project resources: " + result.stderr.strip())
+      self.output.success("Project resources removed")
+    else:
+      container = self.get_container(service)
+      self.output.warning(f"Removing container resources: {service}...")
+      with self.output.status(f"[yellow bold]Stopping container {service}...") as task:
+        result = self.compose(["kill", container.id])
+        if result.returncode != 0:
+          self.output.error("Failed to stop container: " + result.stderr.strip())
+        task.update(f"[yellow bold]Removing container {service}...")
+        result = self.docker(["rm", "-vf", container.id])
+        if result.returncode != 0:
+          self.output.error("Failed to remove container: " + result.stderr.strip())
+        task.update(f"[green bold]Container resources removed")
+      self.output.success(f"Container resources removed")
+
 
   # TODO: Needs testing
   def cleanup(self):
@@ -560,9 +647,9 @@ class CliManager:
   # --------------------------------------
   # TODO: Improve to support other drivers and multiple databases
   # TODO: Needs testing
-  def db_dump(self, output_path: str):
+  def db_dump(self, output_path: Path):
     """Export database dump"""
-    container_id = self.get_container_id("db")
+    container = self.get_container("db")
 
     env_vars = self.project.get_env()
     db_name = env_vars.get('MYSQL_DATABASE')
@@ -573,15 +660,14 @@ class CliManager:
       sys.exit(1)
 
     self.output.verbose(f"Database: {db_name}")
-    self.output.verbose(f"Container: {container_id}")
+    self.output.verbose(f"Container: {container.service}")
 
     with self.output.status(f"Exporting database '{db_name}' to {output_path}..."):
       with open(output_path, 'w') as f:
-        result = subprocess.run(
-          ["docker", "exec", container_id, "mysqldump",
-           "-uroot", f"-p{db_pass}", db_name],
-          stdout=f,
-          stderr=subprocess.PIPE
+        result = subprocess.run([
+          "docker", "exec", container.id, "mysqldump",
+          "-uroot", f"-p{db_pass}", db_name],
+          stdout=f, stderr=subprocess.PIPE
         )
 
       if result.returncode == 0:
@@ -594,25 +680,25 @@ class CliManager:
 
   # TODO: Improve to support other drivers and multiple databases
   # TODO: Needs testing
-  def db_import(self, input_path: str):
+  def db_import(self, input_path: Path):
     """Import database dump"""
-    if not Path(input_path).exists():
+    if not input_path.exists():
       self.output.error(f"File {input_path} not found")
       sys.exit(1)
 
-    container_id = self.get_container_id("db")
+    container = self.get_container("db")
 
     env_vars = self.project.get_env()
     db_name = env_vars.get('MYSQL_DATABASE')
     db_pass = env_vars.get('MYSQL_ROOT_PASSWORD')
 
     self.output.verbose(f"Database: {db_name}")
-    self.output.verbose(f"Container: {container_id}")
+    self.output.verbose(f"Container: {container.service}")
     with self.output.status(f"Importing database from {input_path} to '{db_name}'..."):
       # Copy file to container
       self.output.verbose("Copying dump file to container...")
       result = subprocess.run(
-        ["docker", "cp", input_path, f"{container_id}:/tmp/import.sql"],
+        ["docker", "cp", input_path, f"{container.id}:/tmp/import.sql"],
         capture_output=True
       )
 
@@ -633,14 +719,14 @@ class CliManager:
       )
 
       result = subprocess.run(
-        ["docker", "exec", container_id, "sh", "-c", import_cmd],
+        ["docker", "exec", container.id, "sh", "-c", import_cmd],
         capture_output=True
       )
 
       # Cleanup
       self.output.verbose("Cleaning up temporary file...")
       subprocess.run(
-        ["docker", "exec", container_id, "rm", "-f", "/tmp/import.sql"],
+        ["docker", "exec", container.id, "rm", "-f", "/tmp/import.sql"],
         capture_output=True
       )
 
@@ -758,7 +844,7 @@ class CliManager:
 
   def traefik_config(self, service: str, domain: str, port: str = '80'):
     """Traefik config"""
-    self.get_container_id(service)
+    self.get_container(service)
 
     self.output.info(f"Append this to your [bold]{service}[/bold] service in the [cyan].dip/docker-compose.yml[/cyan]")
     self.output.console.print(
@@ -792,7 +878,7 @@ class CliManager:
     key_file: Path = certs_dir / f"{domain_filename}.key"
     csr_file: Path = certs_dir / f"{domain_filename}.csr"
     cert_file: Path = certs_dir / f"{domain_filename}.crt"
-    chain_file: Path = certs_dir / f"{domain_filename}-chain.crt"  # NEW: Full chain
+    chain_file: Path = certs_dir / f"{domain_filename}-chain.crt"
     config_file: Path = self.traefik_dir / "dynamic" / f"{domain_filename}.yml"
 
     # Step 1: Create CA if it doesn't exist

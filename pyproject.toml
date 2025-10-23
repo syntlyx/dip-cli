@@ -5,6 +5,7 @@ description = "A Python-based tool for simplifying Docker development workflows"
 requires-python = ">=3.8"
 dependencies = [
     "rich>=14.2.0",
+    "click>=8.1",
 ]
 
 [project.optional-dependencies]
