@@ -267,6 +267,11 @@ def custom_excepthook(exc_type, exc_value, exc_traceback):
   if exc_type == KeyboardInterrupt:
     click.echo("\n\nInterrupted by user", err=True)
     sys.exit(1)
+
+  if exc_type in (FileNotFoundError, ValueError, RuntimeError, PermissionError):
+    click.echo(str(exc_value), err=True)
+    sys.exit(1)
+
   sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
 

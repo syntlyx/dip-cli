@@ -422,6 +422,9 @@ class CliManager:
   def exec(self, service: str, command: list[str], shell_type: str = "bash"):
     """Execute a command in a container."""
     container = self.get_container(service)
+    env_vars = self.project.get_env()
+    host_uid = env_vars.get('HOST_UID', str(os.getuid()))
+    host_gid = env_vars.get('HOST_GID', str(os.getgid()))
 
     cwd = Path.cwd()
     relative_path = cwd.relative_to(self.project.root_dir) if cwd.is_relative_to(self.project.root_dir) else Path()
@@ -437,6 +440,7 @@ class CliManager:
 
     result = self.docker([
       "exec", "-e", "COLUMNS", "-e", "LINES",
+      "-u", f"{host_uid}:{host_gid}",
       "-it", "-w", str(container_dest_path),
       container.id, shell_type, "-ilc", *command
     ], capture_output=False, text=False)

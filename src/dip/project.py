@@ -19,6 +19,7 @@ class ProjectConfig:
     self.root_dir: Path = root
     self.dip_dir: Path = root / DIR_NAME
     self.env_file: Path = self.dip_dir / ".env"
+    self.default_env_file: Path = self.dip_dir / "default.env"
     self.compose_file: Path = self.dip_dir / "docker-compose.yml"
 
     self.project_name: Optional[str] = None
@@ -26,7 +27,13 @@ class ProjectConfig:
     self.env_name: Dict[str, str] = {}
 
     if not self.env_file.exists():
-      raise FileNotFoundError(f"Env file not found: {self.env_file}")
+      if self.default_env_file.exists():
+        try:
+          self.env_file.open('w').write(self.default_env_file.read_text())
+        except:
+          raise RuntimeError(f"Error creating env file: {self.env_file}")
+      else:
+        raise FileNotFoundError(f"Env file not found: {self.env_file}")
 
     with open(self.env_file) as f:
       for line in f:
