@@ -9,10 +9,8 @@ from subprocess import CompletedProcess
 from pathlib import Path
 from typing import Optional, List
 
-from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.tree import Tree
 from rich import box
 
@@ -131,9 +129,10 @@ class CliManager:
   def get_container(self, service: str, no_error: bool = False) -> Optional[DockerContainer]:
     """Get container ID for a service"""
     containers = self.get_containers()
+    expected_prefix = f"{self.project.project_name}-{service}"
 
     for cntr in containers:
-      if cntr.service == service:
+      if cntr.service == service and cntr.names.startswith(expected_prefix):
         return cntr
 
     if not no_error:
@@ -146,30 +145,16 @@ class CliManager:
   def get_containers(self, running: bool = False) -> list[DockerContainer]:
     self.is_running()
     self.load_project()
-    def get_name(name: str) -> Optional[str]:
-      try:
-        service_name = self.docker(
-          ["inspect", name, "--format", '{{index .Config.Labels "com.docker.compose.service"}}'],
-          capture_output=True,
-          text=True,
-          check=True
-        ).stdout.strip()
-        return service_name if service_name else None
-
-      except subprocess.CalledProcessError:
-        return None
     try:
-      result = self.docker([
-        "ps", "-a", "--filter", f"name={self.project.project_name}",
-        "--format", "{{json .}}"
+      result = self.compose([
+        "ps", "-a", "--format", "json"
       ])
       containers: list[DockerContainer] = []
       for line in result.stdout.strip().split('\n'):
         if not line:
           continue
         data = json.loads(line)
-        name = get_name(data.get('Names', ''))
-        container = DockerContainer.from_dict(name, data);
+        container = DockerContainer.from_dict(data.get('Service'), data)
         if not running or container.status == 'running':
           containers.append(container)
       return containers
