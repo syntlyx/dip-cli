@@ -93,7 +93,7 @@ def prune(obj: Obj) -> None:
   """Prune unused Docker resources (volumes, networks, images, containers)"""
   obj.dip.prune()
 
-@main.command(help="Run a custom script or command in the project context")
+@main.command(help="Run a custom script or command in the project context", context_settings={"ignore_unknown_options": True, "allow_interspersed_args": False})
 @click.argument("cmd", nargs=-1, required=True)
 @click.pass_obj
 def run(obj: Obj, cmd: tuple[str, ...]) -> None:
